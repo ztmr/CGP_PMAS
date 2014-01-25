@@ -1,0 +1,6 @@
+
+CGP is multiplatform as well as PMAS.
+
+RPMAS is written in Perl that is also multiplatform.
+RPMAS.PL is used with RPMAS.COM on OpenVMS and with CRON scheduler on UNIX.
+

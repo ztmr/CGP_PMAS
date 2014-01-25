@@ -1,0 +1,6 @@
+
+SNOTRA::SYSTEM $ sh sym bayes
+  BAYES == "$PMAS_EXE:BAYES.EXE"
+SNOTRA::SYSTEM $ pipe bayes -h < disk$service:[cgprodata.accounts.tmr-macnt]sent.mbox
+SNOTRA::SYSTEM $ pipe bayes -s < disk$service:[cgprodata.accounts.tmr-macnt]spam.mbox
+

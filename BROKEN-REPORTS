@@ -1,0 +1,4 @@
+PreciseMail Anti-Spam Gateway Error 
+PreciseMail Anti-Spam Gateway has encountered an error. 
+
+SQL error: SELECT SUM(scanned), SUM(delivered), SUM(filtered) FROM filtering WHERE year=2009 AND month=12 AND day=16 AND hour=17 library routine called out of sequence

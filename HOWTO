@@ -1,0 +1,308 @@
+
+ =====================================================================
+ *** CommuniGate Pro and PreciseMail Anti-Spam Gateway Integration ***
+ =====================================================================
+
+I. Working environment and system preparations
+----------------------------------------------
+
+Working environment:
+  - AlphaServer 800
+  - CommuniGate Pro 5.2.5 (5.3?) for OpenVMS
+  - PreciseMail Anti-Spam V3.0
+  - PERL V5.8.6 built for VMS_AXP
+  - Internet Router and Packet Filter
+
+CGP has been installed on SYS$SYSDEVICE: as it's a default.
+PMAS has been installed to DISK$SERVICE:[PMAS].
+CGP's data directory is separated from CGSERVER's base. It is
+located in DISK$SERVICE:[CGPRODATA].
+
+Both products are installed regarding to their official documentation.
+
+I've also created separate user accounts for both of these services.
+They're wrapped in [DOMN$CTL] "Domain Controller" account.
+(I often hate M$ products and terminology, but "domain controller"
+sounds as a very accurate name for a centralized network package).
+
+Full SYSUAF listing of [DOMN$CTL,*] is attached as an Appendix A.
+
+XXX: is it possible to run CGP and PMAS as a non-privileged user?
+Previously mentioned user accounts are used only for external tools,
+queues, and file access ownership.
+
+CGP services are listening on well-known ports.
+PMAS is configured to listen on 0.0.0.0:2525.
+PMAS is not configured to provide secure channel.
+
+Internet gateway's port 25 is redirected to PMAS (2525)
+instead of to CGP (25).
+That's because I don't expect SPAM from a local network.
+
+
+II. CGP-side configuration
+--------------------------
+
+The CommuniGate Pro for OpenVMS does not support external commands
+neither as LOCAL/Rules nor using PIPE modules.
+
+The PMAS responder needs to parse each email message and then reply
+to its originator. This can be done two ways:
+
+(i) single-purpose PMAS account with MailDir structure in conjunction
+    with a local DCL file-harvester (MailDir => message=file).
+    This solution is very simple, but has some disadvantages:
+      - scalability: it's only local/cluster-wide solution;
+      - security: needs access to entire CGP's data directory;
+      - consistency and security again: if the message file is deleted,
+        CGSERVER would tend to crash (not tested).
+        This can be solved by the modification of mailbox metadata,
+        but even if we knew their data structure, it can be locked,
+        or at least complicated to implement.
+
+(ii) single-purpose PMAS account without matter to message
+     storage structure, but with IMAP access to INBOX.
+     This case is a little bit better than (i), but it has also
+     it's disadvantages:
+       - implementation: more complex to implement;
+       - performance: a bit more of overhead when accessing mailbox
+         (on both ends, the PMAS and CGP, even if they're on the same node);
+       - security: open network access for "service" domain account (PMAS);
+       - complexity: it's work is not based on filesystem, but on a remote
+         network service (IMAP). In other words, there're more things
+         to break the service down.
+
+The only disadvantage of those two solutions against a native
+ExternalCommand is a requirement of periodical polling of mailbox.
+
+Another general, but often not so bothering, disadvantage of these
+methods is the need of single-purpose CGP account: CGP is licensed
+per number of users in domain.
+
+So the winner is (ii). It's just what the RPMAS kit implements.
+The name of the single-purpose PMAS account must correspond with
+NOTIFY_RUN_USER from PMAS_DATA:PMAS_CONFIG.DAT config file.
+
+Everything what we need to do on CGP's side is to create a new PMAS account.
+Such an account's access/services should be restricted to Mail, IMAP and TLS.
+
+Installation of RPMAS itself is described in section V.
+
+
+III. Web GUI Configuration
+--------------------------
+
+The PMAS kit also contains a simple WebUser/WebAdmin application.
+It is compatible with all commonly used HTTP servers for OpenVMS
+(all those variants are well documented).
+
+I have successfully installed it on WASD as follows:
+  - modify HT_ROOT:[LOCAL]HTTPD$MAP.CONF to populate PMAS_ROOT:[HTML]
+    and PMAS_ROOT:[ALPHA_EXE.CGI] directories:
+
+      # PreciseMail Anti-Spam
+      exec /scripts/pmas/* /pmas_root/alpha_exe/cgi/*
+      pass /pmas/* /pmas_root/html/* 
+
+  - do HTTPD/DO=MAP=RELOAD command;
+  - set the permissions to allow WASD to read HTML and execute CGIs:
+
+      $ SET SEC/ACL=(IDENTIFIER=[HTTP$SERVER],ACCESS=READ) -
+            PMAS_ROOT:[000000]HTML.DIR
+      $ SET SEC/ACL=(IDENTIFIER=[HTTP$SERVER],ACCESS=READ) -
+            PMAS_ROOT:[HTML...]*.*;*
+      $ SET SEC/ACL=(IDENTIFIER=[HTTP$SERVER],ACCESS=READ) -
+            PMAS_ROOT:[ALPHA_EXE]CGI.DIR
+      $ SET SEC/ACL=(IDENTIFIER=[HTTP$SERVER],ACCESS=READ+EXECUTE) -
+            PMAS_ROOT:[ALPHA_EXE.CGI...]*.*;*
+      (XXX: CGIs are executed as HTTP$NOBODY! it shouldn't work
+       ONLY with HTTP$SERVER... there's something weird.)
+
+  - point your web browser to http://yourserver.org/pmas/;
+  - administrator login is pmas_admin (the password must be changed
+    using PMAS_EXE:PMASADMIN.EXE -- see documentation for more info).
+
+To integrate with CGP's user database, see the IV. Domain Integration
+section.
+
+
+IV. Domain integration
+-----------------------
+
+PMAS can be configured to authenticate users against it's own
+user database, using local system account (SYSUAF), through
+an external LDAP directory, or using POP3 or IMAP4.
+
+There's also an option to configure authentication methods order.
+
+I have tried the LDAP and IMAP4 solutions.
+
+Once you've configured Web GUI and logged in as pmas_admin,
+you can comfortably configure all of it using web.
+
+I have been very surprised by POP3/IMAP4 authentication
+because it does not require any special link to mailserver.
+It simply try to login to your mailbox and if the operation
+performs successfully, you're just authenticated.
+
+
+V. Remote IMAP Responder for PMAS
+----------------------------------
+
+Simple installation how-to:
+
+(1) obtain a copy of rpmas.com and rpmas.pl:
+
+    $ create/dir pmas_root:[common_exe]
+    $ set def pmas_root:[common_exe]
+    $ wget "http://www.fooboo.org/~tmr/public/PMAS-CGP/rpmas.com"
+    $ wget "http://www.fooboo.org/~tmr/public/PMAS-CGP/rpmas.pl"
+
+(2) site specific modifications;
+
+    $ edt rpmas.com
+    $ edt rpmas.pl
+
+(3) install Perl with Net::IMAP::Simple module;
+
+(4) allow PMAS user to read/write PMAS directory tree.
+    RPMAS must be able to write to a temporary directory.
+    It need not to be neccessarily in PMAS_ROOT:,
+    so then you need to change it in RPMAS.PL;
+
+(5) modify sys$startup:pmas_startup to run rpmas.com just after
+    startup of pmas itself;
+
+...anything more?
+
+Administration notes:
+  - it is recommended to create a new queue for entire PMAS.
+    It can look like this:
+
+       Batch queue PMAS$BATCH, idle, on SNOTRA::
+         /BASE_PRIORITY=4 /JOB_LIMIT=1 /OWNER=[DOMN$CTL,PMAS]
+         /PROTECTION=(S:M,O:M,G:R,W:S)
+
+Implementation notes:
+  - CGP stores mail message (in the case of MailDir) as a standard
+    UNIX file where the each line is terminated by a single NL (LF, 0x0A).
+    PMAS responder utility expects the same format.
+    But if we receive the message from IMAP and then try to save it
+    as a file, we get the file with lines terminated by CR-LF (0x0D 0x0A).
+    PMAS responder utility does not parse it properly without respect
+    to VMS file attributes.
+    The current implementation does a simple substitution of '\r\n' to '\n'
+    and everything seems to work well.
+  - Net::IMAP::Simple doesn't return a proper return values, so we're not
+    able to check out the status of $server->login () for example.
+  - the performance and startup overhead can be reduced by running RPMAS.PL
+    as a daemon in the background. It could save us resources
+    by avoiding the slow $CREPRC of PERL image startup and runtime
+  - another performance improvement of such a daemon would be to support
+    persistent connections to IMAP server. But at the opposite, when our
+    IMAP connection become broken, we should be informed about it
+    (=> test Net::IMAP::Simple's behavior in special cases)
+  - I have a version with "daemonize" support, but there are some issues
+    around POSIX sleep() while polling. I haven't even the faintest
+    idea why it does not work properly.
+  - it's recommended to install PERL.EXE (and PERLSHR.EXE also?) as a /SHARED
+    ...at least until we run it periodically from a batch queue.
+
+
+Appendix A: SYSUAF users
+------------------------
+
+User accounts I have created for the purpose of CGP/PMAS:
+
+Username: CGPSRV                           Owner:  CommuniGatePRO Server
+Account:  DOMN$CTL                         UIC:    [321,1] ([DOMN$CTL,CGPSRV])
+CLI:      DCL                              Tables: DCLTABLES
+Default:  DISK$SERVICE:[CGPRODATA]
+LGICMD:   LOGIN
+Flags:
+Primary days:   Mon Tue Wed Thu Fri
+Secondary days:                     Sat Sun
+Primary   000000000011111111112222  Secondary 000000000011111111112222
+Day Hours 012345678901234567890123  Day Hours 012345678901234567890123
+Network:  ##### Full access ######            ##### Full access ######
+Batch:    ##### Full access ######            ##### Full access ######
+Local:    -----  No access  ------            -----  No access  ------
+Dialup:   -----  No access  ------            -----  No access  ------
+Remote:   -----  No access  ------            -----  No access  ------
+Expiration:            (none)    Pwdminimum:  6   Login Fails:     0
+Pwdlifetime:         90 00:00    Pwdchange:      (pre-expired)
+Last Login:            (none) (interactive),            (none) (non-interactive)
+Maxjobs:         0  Fillm:       100  Bytlm:        52200
+Maxacctjobs:     0  Shrfillm:      0  Pbytlm:           0
+Maxdetach:       0  BIOlm:       400  JTquota:       4096
+Prclm:           8  DIOlm:        50  WSdef:          350
+Prio:            8  ASTlm:       100  WSquo:         1024
+Queprio:         4  TQElm:        50  WSextent:      4000
+CPU:        (none)  Enqlm:       100  Pgflquo:      50000
+Authorized Privileges:
+  NETMBX       TMPMBX
+Default Privileges:
+  NETMBX       TMPMBX
+
+Username: PMAS                             Owner:  PreciseMail Anti-Spam
+Account:  DOMN$CTL                         UIC:    [321,2] ([DOMN$CTL,PMAS])
+CLI:      DCL                              Tables: DCLTABLES
+Default:  DISK$SERVICE:[PMAS]
+LGICMD:   LOGIN
+Flags:
+Primary days:   Mon Tue Wed Thu Fri
+Secondary days:                     Sat Sun
+Primary   000000000011111111112222  Secondary 000000000011111111112222
+Day Hours 012345678901234567890123  Day Hours 012345678901234567890123
+Network:  ##### Full access ######            ##### Full access ######
+Batch:    ##### Full access ######            ##### Full access ######
+Local:    -----  No access  ------            -----  No access  ------
+Dialup:   -----  No access  ------            -----  No access  ------
+Remote:   -----  No access  ------            -----  No access  ------
+Expiration:            (none)    Pwdminimum:  6   Login Fails:     0
+Pwdlifetime:         90 00:00    Pwdchange:  16-DEC-2009 17:00
+Last Login: 16-DEC-2009 17:00 (interactive), 17-DEC-2009 02:21 (non-interactive)
+Maxjobs:         0  Fillm:       100  Bytlm:        52200
+Maxacctjobs:     0  Shrfillm:      0  Pbytlm:           0
+Maxdetach:       0  BIOlm:       400  JTquota:       4096
+Prclm:           8  DIOlm:        50  WSdef:          350
+Prio:            8  ASTlm:       100  WSquo:         1024
+Queprio:         4  TQElm:        50  WSextent:      4000
+CPU:        (none)  Enqlm:       100  Pgflquo:      50000
+Authorized Privileges:
+  NETMBX       TMPMBX
+Default Privileges:
+  NETMBX       TMPMBX
+
+
+Appendix B: PMAS_DATA:PMAS_CONFIG.DAT Example
+---------------------------------------------
+
+# PTSMTP Configuration
+ptsmtp_listen_port              2525
+ptsmtp_mailserver_host          127.0.0.1
+ptsmtp_mailserver_port          25
+notify_queue                    PMAS$BATCH
+nofify_run_user                 PMAS
+gui_uri_host                    www.example.org
+pmas_system_name                mail.example.org
+add_spam_yes_header             yes
+verify_mail_from_addresses      yes
+use_bayesian                    yes
+autotrain_bayesian              yes
+processor_user_name             pmas
+autoupdate_rules                2
+gui_uri_path                    /pmas/
+gui_uri_script_path             /scripts/pmas/
+admin_email_address             system@example.org
+gui_cookie_lifetime             0
+allow_user_quarantine           yes
+allow_user_discard              yes
+auth_methods                    PMAS,SYSTEM,LDAP,IMAP4
+ldap_auth_server                ldap.example.org
+ldap_searchacct_dn              postmaster
+ldap_searchacct_password        some-secret-password
+ldap_use_tls                    1
+ldap_base_dn                    cn=example.org
+auth_imap4_hosts                mail.example.org
+

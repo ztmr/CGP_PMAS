@@ -1,0 +1,15 @@
+
+PMAS also supports Anti-Virus solutions. At least Sophos and ClamAV.
+
+Anti-virus protection cannot be generally done on CGP, even if
+Stalker says they can. It's because of depedence on ExternalFilters.
+ExternalCommands are not supported on all CGP's platforms.
+
+There's opensource ClamAV port for OpenVMS.
+You can find it on Alexey Chupahin's website:
+  http://fafner.dyndns.org/~alexey/clamav/
+
+I don't use anti-virus solutions.
+Our computers are virus-aware by default ;-)
+So why to spend system resources on virus filtering?
+
